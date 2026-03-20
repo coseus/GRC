@@ -13,8 +13,66 @@ from utils import (
     build_mapping_rows,
     sort_recommendations_by_risk,
     sort_recommendations_for_roadmap,
+    build_management_export_content,
 )
 from word_report import generate_word_report
+
+
+def _management_editor_state_key(assessment_id: int, suffix: str) -> str:
+    return f"mgmt_export_{assessment_id}_{suffix}"
+
+
+def _initialize_management_editor(assessment_id: int, recommendations, lang: str, max_per_domain: int):
+    data = build_management_export_content(
+        recommendations=recommendations,
+        lang=lang,
+        max_per_domain=max_per_domain,
+    )
+
+    intro_key = _management_editor_state_key(assessment_id, "intro")
+    top_key = _management_editor_state_key(assessment_id, "top_actions")
+
+    if intro_key not in st.session_state:
+        st.session_state[intro_key] = data["intro"]
+
+    if top_key not in st.session_state:
+        st.session_state[top_key] = "\n".join(data["top_actions"])
+
+    for domain, bullets in data["domain_blocks"].items():
+        domain_key = _management_editor_state_key(assessment_id, f"domain_{domain}")
+        if domain_key not in st.session_state:
+            st.session_state[domain_key] = "\n".join(bullets)
+
+    return data
+
+
+def _build_management_content_from_editor(assessment_id: int, recommendations, lang: str, max_per_domain: int):
+    auto_data = build_management_export_content(
+        recommendations=recommendations,
+        lang=lang,
+        max_per_domain=max_per_domain,
+    )
+
+    intro_key = _management_editor_state_key(assessment_id, "intro")
+    top_key = _management_editor_state_key(assessment_id, "top_actions")
+
+    intro = st.session_state.get(intro_key, auto_data["intro"])
+    top_actions_text = st.session_state.get(top_key, "\n".join(auto_data["top_actions"]))
+    top_actions = [line.strip() for line in top_actions_text.splitlines() if line.strip()][:5]
+
+    domain_blocks = {}
+    for domain in auto_data["domain_blocks"].keys():
+        domain_key = _management_editor_state_key(assessment_id, f"domain_{domain}")
+        text = st.session_state.get(domain_key, "\n".join(auto_data["domain_blocks"][domain]))
+        bullets = [line.strip() for line in text.splitlines() if line.strip()][:max_per_domain]
+        if bullets:
+            domain_blocks[domain] = bullets
+
+    return {
+        "intro": intro,
+        "top_actions": top_actions,
+        "domain_blocks": domain_blocks,
+    }
 
 
 def render_import_export_section(data, lang, user, company, assessment, assessment_state):
@@ -32,7 +90,7 @@ def render_import_export_section(data, lang, user, company, assessment, assessme
 
     st.subheader("Export Options")
 
-    col_opt1, col_opt2, col_opt3 = st.columns(3)
+    col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
 
     with col_opt1:
         export_mode = st.selectbox(
@@ -53,6 +111,68 @@ def render_import_export_section(data, lang, user, company, assessment, assessme
             "Include Control Mapping",
             value=False if export_mode == "Executive" else True,
         )
+
+    with col_opt4:
+        max_bullets_per_domain = st.selectbox(
+            "Max bullets / domain",
+            [3, 4, 5],
+            index=0,
+            disabled=(export_mode != "Executive"),
+        )
+
+    if export_mode == "Executive":
+        _initialize_management_editor(
+            assessment_id=assessment["id"],
+            recommendations=recommendations,
+            lang=lang,
+            max_per_domain=max_bullets_per_domain,
+        )
+
+        st.subheader("Executive Export Editor")
+
+        intro_key = _management_editor_state_key(assessment["id"], "intro")
+        top_key = _management_editor_state_key(assessment["id"], "top_actions")
+
+        st.text_area(
+            "Intro text",
+            key=intro_key,
+            height=80,
+            help="This text will appear before the management recommendations.",
+        )
+
+        st.text_area(
+            "Top 5 Priority Actions (one line = one bullet)",
+            key=top_key,
+            height=140,
+        )
+
+        auto_data = build_management_export_content(
+            recommendations=recommendations,
+            lang=lang,
+            max_per_domain=max_bullets_per_domain,
+        )
+
+        st.markdown("### Key Areas of Improvement by Domain")
+        for domain in auto_data["domain_blocks"].keys():
+            domain_key = _management_editor_state_key(assessment["id"], f"domain_{domain}")
+            st.text_area(
+                f"{domain} (one line = one bullet, max {max_bullets_per_domain})",
+                key=domain_key,
+                height=130,
+            )
+
+        management_content = _build_management_content_from_editor(
+            assessment_id=assessment["id"],
+            recommendations=recommendations,
+            lang=lang,
+            max_per_domain=max_bullets_per_domain,
+        )
+    else:
+        management_content = {
+            "intro": "",
+            "top_actions": [],
+            "domain_blocks": {},
+        }
 
     if export_mode == "Executive":
         export_responses = [
@@ -88,6 +208,7 @@ def render_import_export_section(data, lang, user, company, assessment, assessme
         include_proof=include_proof,
         include_mapping=include_mapping,
         export_mode=export_mode,
+        management_content=management_content,
     )
 
     st.subheader("Export")
@@ -115,6 +236,7 @@ def render_import_export_section(data, lang, user, company, assessment, assessme
             include_proof=include_proof,
             include_mapping=include_mapping,
             export_mode=export_mode,
+            management_content=management_content,
         )
         st.download_button(
             "Export PDF",
@@ -137,6 +259,7 @@ def render_import_export_section(data, lang, user, company, assessment, assessme
             include_proof=include_proof,
             include_mapping=include_mapping,
             export_mode=export_mode,
+            management_content=management_content,
         )
         st.download_button(
             "Export Word",
