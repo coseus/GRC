@@ -19,6 +19,7 @@ def export_assessment_package(
     include_proof=False,
     include_mapping=False,
     export_mode="Executive",
+    management_content=None,
 ):
     return {
         "company_name": company_name,
@@ -33,6 +34,7 @@ def export_assessment_package(
         "answers": answers,
         "recommendations": recommendations,
         "mapping_rows": mapping_rows,
+        "management_content": management_content or {},
     }
 
 
