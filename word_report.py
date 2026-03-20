@@ -1,4 +1,5 @@
 from io import BytesIO
+
 from docx import Document
 
 from utils import sort_recommendations_by_risk
@@ -17,9 +18,15 @@ def generate_word_report(
     include_proof=False,
     include_mapping=False,
     export_mode="Executive",
+    management_content=None,
 ):
     recommendations = sort_recommendations_by_risk(recommendations)
     responses = responses or []
+    management_content = management_content or {
+        "intro": "",
+        "top_actions": [],
+        "domain_blocks": {},
+    }
 
     doc = Document()
 
@@ -56,28 +63,55 @@ def generate_word_report(
     else:
         doc.add_paragraph("-")
 
-    doc.add_heading("Recommendations", level=1)
-    if recommendations:
-        table = doc.add_table(rows=1, cols=6)
-        table.style = "Table Grid"
-        hdr = table.rows[0].cells
-        hdr[0].text = "Domain"
-        hdr[1].text = "Risk"
-        hdr[2].text = "Recommendation"
-        hdr[3].text = "Status"
-        hdr[4].text = "Responsible"
-        hdr[5].text = "Deadline"
+    if export_mode == "Executive":
+        intro = (management_content.get("intro") or "").strip()
+        top_actions = management_content.get("top_actions", [])
+        domain_blocks = management_content.get("domain_blocks", {})
 
-        for r in recommendations:
-            row = table.add_row().cells
-            row[0].text = r.get("domain_name", "")
-            row[1].text = r.get("risk", "")
-            row[2].text = r.get("text", "")
-            row[3].text = r.get("status", "")
-            row[4].text = r.get("responsible", "") or ""
-            row[5].text = r.get("deadline", "") or ""
+        if intro:
+            doc.add_paragraph(intro)
+
+        doc.add_heading("Top 5 Priority Actions", level=1)
+        if top_actions:
+            for item in top_actions[:5]:
+                if str(item).strip():
+                    doc.add_paragraph(item, style="List Bullet")
+        else:
+            doc.add_paragraph("-")
+
+        doc.add_heading("Key Areas of Improvement", level=1)
+        if domain_blocks:
+            for domain, bullets in domain_blocks.items():
+                doc.add_paragraph(domain, style="Heading 2")
+                for bullet in bullets:
+                    if str(bullet).strip():
+                        doc.add_paragraph(bullet, style="List Bullet")
+        else:
+            doc.add_paragraph("-")
+
     else:
-        doc.add_paragraph("-")
+        doc.add_heading("Recommendations", level=1)
+        if recommendations:
+            table = doc.add_table(rows=1, cols=6)
+            table.style = "Table Grid"
+            hdr = table.rows[0].cells
+            hdr[0].text = "Domain"
+            hdr[1].text = "Risk"
+            hdr[2].text = "Recommendation"
+            hdr[3].text = "Status"
+            hdr[4].text = "Responsible"
+            hdr[5].text = "Deadline"
+
+            for r in recommendations:
+                row = table.add_row().cells
+                row[0].text = r.get("domain_name", "")
+                row[1].text = r.get("risk", "")
+                row[2].text = r.get("text", "")
+                row[3].text = r.get("status", "")
+                row[4].text = r.get("responsible", "") or ""
+                row[5].text = r.get("deadline", "") or ""
+        else:
+            doc.add_paragraph("-")
 
     if export_mode == "Detailed":
         doc.add_heading("Assessment Details", level=1)
