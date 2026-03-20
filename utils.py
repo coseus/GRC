@@ -1,4 +1,5 @@
 from io import BytesIO
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -307,6 +308,55 @@ def sort_recommendations_for_roadmap(recommendations):
     )
 
 
+def get_management_intro(lang: str) -> str:
+    if lang == "ro":
+        return "Recomandarile de mai jos trebuie prioritizate in ordinea importantei."
+    return "The recommendations below should be prioritized in order of importance."
+
+
+def build_management_export_content(recommendations, lang="en", max_per_domain=3):
+    recommendations = sort_recommendations_by_risk(recommendations)
+
+    grouped = defaultdict(list)
+    for r in recommendations:
+        domain = r.get("domain_name", "Other")
+        text = (r.get("text", "") or "").strip()
+        if text:
+            grouped[domain].append(r)
+
+    domain_blocks = {}
+    top_actions = []
+
+    for domain, items in grouped.items():
+        seen = set()
+        kept = []
+        for item in items:
+            text = (item.get("text", "") or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            kept.append(text)
+            if len(kept) >= max_per_domain:
+                break
+        domain_blocks[domain] = kept
+
+    seen_top = set()
+    for item in recommendations:
+        text = (item.get("text", "") or "").strip()
+        if not text or text in seen_top:
+            continue
+        seen_top.add(text)
+        top_actions.append(text)
+        if len(top_actions) >= 5:
+            break
+
+    return {
+        "intro": get_management_intro(lang),
+        "top_actions": top_actions,
+        "domain_blocks": domain_blocks,
+    }
+
+
 def generate_pdf(
     company_name,
     assessment_name,
@@ -320,9 +370,15 @@ def generate_pdf(
     include_proof=False,
     include_mapping=False,
     export_mode="Executive",
+    management_content=None,
 ):
     recommendations = sort_recommendations_by_risk(recommendations)
     responses = responses or []
+    management_content = management_content or {
+        "intro": "",
+        "top_actions": [],
+        "domain_blocks": {},
+    }
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -355,6 +411,17 @@ def generate_pdf(
         fontSize=8,
         leading=10,
         textColor=colors.white,
+    )
+
+    bullet_style = ParagraphStyle(
+        "BulletStyle",
+        parent=normal,
+        fontName="Helvetica",
+        fontSize=10,
+        leading=13,
+        leftIndent=14,
+        firstLineIndent=-8,
+        spaceAfter=4,
     )
 
     story = []
@@ -402,44 +469,72 @@ def generate_pdf(
         ]))
         story.append(table)
         story.append(Spacer(1, 12))
-        story.append(Image(generate_bar_chart(domain_scores), width=480, height=240))
-        story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Recommendations", heading))
-    if recommendations:
-        rows = [[
-            Paragraph("Domain", table_header),
-            Paragraph("Risk", table_header),
-            Paragraph("Recommendation", table_header),
-            Paragraph("Status", table_header),
-            Paragraph("Responsible", table_header),
-            Paragraph("Deadline", table_header),
-        ]]
+    if export_mode == "Executive":
+        intro = (management_content.get("intro") or "").strip()
+        top_actions = management_content.get("top_actions", [])
+        domain_blocks = management_content.get("domain_blocks", {})
 
-        for r in recommendations:
-            rows.append([
-                Paragraph(str(r.get("domain_name", "") or ""), table_cell),
-                Paragraph(str(r.get("risk", "") or ""), table_cell),
-                Paragraph(str(r.get("text", "") or ""), table_cell),
-                Paragraph(str(r.get("status", "") or ""), table_cell),
-                Paragraph(str(r.get("responsible", "") or ""), table_cell),
-                Paragraph(str(r.get("deadline", "") or ""), table_cell),
-            ])
+        if intro:
+            story.append(Paragraph(intro, normal))
+            story.append(Spacer(1, 10))
 
-        rec_table = Table(rows, colWidths=[90, 45, 190, 55, 95, 60], repeatRows=1)
-        rec_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e78")),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f7f7")]),
-        ]))
-        story.append(rec_table)
+        story.append(Paragraph("Top 5 Priority Actions", heading))
+        if top_actions:
+            for item in top_actions[:5]:
+                if str(item).strip():
+                    story.append(Paragraph(f"• {item}", bullet_style))
+        else:
+            story.append(Paragraph("-", normal))
+
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Key Areas of Improvement", heading))
+        if domain_blocks:
+            for domain, bullets in domain_blocks.items():
+                story.append(Paragraph(f"<b>{domain}</b>", normal))
+                for bullet in bullets:
+                    if str(bullet).strip():
+                        story.append(Paragraph(f"• {bullet}", bullet_style))
+                story.append(Spacer(1, 6))
+        else:
+            story.append(Paragraph("-", normal))
+
     else:
-        story.append(Paragraph("-", normal))
+        story.append(Paragraph("Recommendations", heading))
+        if recommendations:
+            rows = [[
+                Paragraph("Domain", table_header),
+                Paragraph("Risk", table_header),
+                Paragraph("Recommendation", table_header),
+                Paragraph("Status", table_header),
+                Paragraph("Responsible", table_header),
+                Paragraph("Deadline", table_header),
+            ]]
+
+            for r in recommendations:
+                rows.append([
+                    Paragraph(str(r.get("domain_name", "") or ""), table_cell),
+                    Paragraph(str(r.get("risk", "") or ""), table_cell),
+                    Paragraph(str(r.get("text", "") or ""), table_cell),
+                    Paragraph(str(r.get("status", "") or ""), table_cell),
+                    Paragraph(str(r.get("responsible", "") or ""), table_cell),
+                    Paragraph(str(r.get("deadline", "") or ""), table_cell),
+                ])
+
+            rec_table = Table(rows, colWidths=[90, 45, 190, 55, 95, 60], repeatRows=1)
+            rec_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f4e78")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f7f7")]),
+            ]))
+            story.append(rec_table)
+        else:
+            story.append(Paragraph("-", normal))
 
     if export_mode == "Detailed":
         story.append(Spacer(1, 12))
