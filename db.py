@@ -153,6 +153,50 @@ def list_users():
         return [dict(r) for r in rows]
 
 
+def get_user_by_id(user_id: int):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, username, role, is_active, created_at FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_user(user_id: int, username: str, role: str, is_active: bool):
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE users
+                SET username = ?, role = ?, is_active = ?
+                WHERE id = ?
+                """,
+                (username, role, 1 if is_active else 0, user_id),
+            )
+        return True, "User updated."
+    except sqlite3.IntegrityError:
+        return False, "Username already exists."
+
+
+def update_user_password(user_id: int, new_password: str):
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET password_hash = ?
+            WHERE id = ?
+            """,
+            (hash_password(new_password), user_id),
+        )
+    return True, "Password updated."
+
+
+def delete_user(user_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    return True, "User deleted."
+
+
 def create_company(name: str):
     with get_connection() as conn:
         row = conn.execute("SELECT id FROM companies WHERE name = ?", (name,)).fetchone()
